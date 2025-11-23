@@ -20,7 +20,7 @@ export default async function handler(req, res) {
   }
 
   // Robust API Key check
-  const apiKey = process.env.API_KEY || process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY;
+  const apiKey = (process.env.API_KEY || process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || "").trim();
 
   if (!apiKey) {
     console.error("CRITICAL: API Key missing in Vercel Environment Variables.");
@@ -30,7 +30,17 @@ export default async function handler(req, res) {
     });
   }
 
-  let { text } = req.body;
+  // Handle body parsing
+  let body = req.body;
+  if (typeof body === 'string') {
+    try {
+      body = JSON.parse(body);
+    } catch (e) {
+      return res.status(400).json({ error: 'Invalid JSON body' });
+    }
+  }
+
+  let { text } = body || {};
   
   if (!text) {
       return res.status(400).json({ error: 'No text provided' });
@@ -77,7 +87,7 @@ export default async function handler(req, res) {
     const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
 
     if (!base64Audio) {
-        console.error("Model returned no audio data. Candidates:", JSON.stringify(response.candidates));
+        console.error("Model returned no audio data.");
         throw new Error("No audio data returned from model");
     }
 

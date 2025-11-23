@@ -1,7 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
 
 export default async function handler(req, res) {
-  // Handle CORS for Vercel if necessary (usually handled by rewrite, but good safety)
+  // Handle CORS for Vercel
   res.setHeader('Access-Control-Allow-Credentials', true);
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
@@ -19,8 +19,8 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method Not Allowed' });
   }
 
-  // Robust API Key check: Try common names
-  const apiKey = process.env.API_KEY || process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY;
+  // Robust API Key check
+  const apiKey = (process.env.API_KEY || process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || "").trim();
 
   if (!apiKey) {
     console.error("CRITICAL: API Key missing in Vercel Environment Variables.");
@@ -30,7 +30,17 @@ export default async function handler(req, res) {
     });
   }
 
-  const { text, language } = req.body;
+  // Handle body parsing if Vercel doesn't do it automatically (rare, but good safety)
+  let body = req.body;
+  if (typeof body === 'string') {
+    try {
+      body = JSON.parse(body);
+    } catch (e) {
+      return res.status(400).json({ error: 'Invalid JSON body' });
+    }
+  }
+  
+  const { text, language } = body || {};
   
   if (!text) {
      return res.status(400).json({ error: 'No text provided' });
@@ -54,8 +64,8 @@ export default async function handler(req, res) {
       config: {
         systemInstruction,
         temperature: 0.7,
-        maxOutputTokens: 300, // Limit output to prevent timeouts
-        // Disable safety settings to prevent blocking religious content (false positives)
+        maxOutputTokens: 300,
+        // Disable safety settings to prevent blocking religious content
         safetySettings: [
           { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
           { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
@@ -93,7 +103,6 @@ export default async function handler(req, res) {
     res.status(200).json({ text: generatedText, mapLink, webLinks });
   } catch (error) {
     console.error('Narada API Error:', error);
-    // Return the actual error message for debugging purposes
     res.status(500).json({ error: 'Failed to generate response', details: error.message });
   }
 }

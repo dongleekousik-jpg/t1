@@ -6,7 +6,7 @@ export const stopNativeAudio = () => {
   }
 };
 
-// Helper to wait for voices to be loaded (Async)
+// Helper to wait for voices to be loaded (Async with polling)
 const waitForVoices = (): Promise<SpeechSynthesisVoice[]> => {
   return new Promise((resolve) => {
     let voices = window.speechSynthesis.getVoices();
@@ -15,14 +15,18 @@ const waitForVoices = (): Promise<SpeechSynthesisVoice[]> => {
       return;
     }
     
-    // Voices not loaded yet, wait for event
-    window.speechSynthesis.onvoiceschanged = () => {
-      voices = window.speechSynthesis.getVoices();
-      resolve(voices);
-    };
-    
-    // Timeout fallback after 2 seconds to avoid hanging
+    // Poll for voices every 100ms
+    const intervalId = setInterval(() => {
+        voices = window.speechSynthesis.getVoices();
+        if (voices.length > 0) {
+            clearInterval(intervalId);
+            resolve(voices);
+        }
+    }, 100);
+
+    // Timeout fallback after 2 seconds
     setTimeout(() => {
+        clearInterval(intervalId);
         resolve(window.speechSynthesis.getVoices());
     }, 2000);
   });
@@ -45,9 +49,9 @@ export const speak = async (text: string, language: string, onEnd: () => void) =
 
   const utterance = new SpeechSynthesisUtterance(text);
 
-  // Improved Voice Selection Logic
+  // Map app language codes to BCP 47 tags
   const langMap: Record<string, string> = {
-    'en': 'en-IN',
+    'en': 'en-IN', // Prefer Indian English
     'te': 'te-IN',
     'hi': 'hi-IN',
     'ta': 'ta-IN',
@@ -56,26 +60,28 @@ export const speak = async (text: string, language: string, onEnd: () => void) =
 
   const targetLang = langMap[language] || 'en-US';
   
-  // 1. Exact match (e.g., te-IN)
+  // Voice Selection Strategy:
+  // 1. Exact BCP 47 match (e.g. 'te-IN')
   let selectedVoice = voices.find(v => v.lang === targetLang);
   
-  // 2. Loose match (e.g., any 'te' voice)
+  // 2. Fuzzy match by language code (e.g. 'te' matches 'te_IN' or 'tel')
   if (!selectedVoice) {
-      const shortLang = language; // 'te', 'hi', etc.
-      selectedVoice = voices.find(v => v.lang.startsWith(shortLang));
+      // Normalize voice lang (replace _ with -) and check inclusion
+      selectedVoice = voices.find(v => v.lang.replace('_', '-').toLowerCase().startsWith(language.toLowerCase()));
   }
-  
-  // 3. Fallback to English India
+
+  // 3. Fallback to any English voice if specific language not found
   if (!selectedVoice) {
-      selectedVoice = voices.find(v => v.lang === 'en-IN');
+      console.warn(`Voice for ${language} not found, falling back to English.`);
+      selectedVoice = voices.find(v => v.lang.includes('en'));
   }
 
   if (selectedVoice) {
     utterance.voice = selectedVoice;
+    // utterance.lang needs to match the voice to ensure correct pronunciation rules
+    utterance.lang = selectedVoice.lang; 
     console.log(`Using voice: ${selectedVoice.name} (${selectedVoice.lang})`);
-  } else {
-    console.warn(`No voice found for ${targetLang}, using default.`);
-  }
+  } 
 
   // Rate correction
   utterance.rate = 0.9;
@@ -100,9 +106,8 @@ let globalSource: AudioBufferSourceNode | null = null;
 export const audioCache: Record<string, AudioBuffer> = {};
 
 // --- IndexedDB for Persistent Caching ---
-// Bumped version to v11 to invalidate old caches
-const DB_NAME = 'GovindaMitraAudioDB_v11';
-const DB_VERSION = 11;
+const DB_NAME = 'GovindaMitraAudioDB_v12'; // Increment version to clear old cache
+const DB_VERSION = 12;
 const STORE_NAME = 'audio_store';
 
 const openDB = (): Promise<IDBDatabase> => {
