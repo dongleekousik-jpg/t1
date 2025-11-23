@@ -6,7 +6,29 @@ export const stopNativeAudio = () => {
   }
 };
 
-export const speak = (text: string, language: string, onEnd: () => void) => {
+// Helper to wait for voices to be loaded (Async)
+const waitForVoices = (): Promise<SpeechSynthesisVoice[]> => {
+  return new Promise((resolve) => {
+    let voices = window.speechSynthesis.getVoices();
+    if (voices.length > 0) {
+      resolve(voices);
+      return;
+    }
+    
+    // Voices not loaded yet, wait for event
+    window.speechSynthesis.onvoiceschanged = () => {
+      voices = window.speechSynthesis.getVoices();
+      resolve(voices);
+    };
+    
+    // Timeout fallback after 2 seconds to avoid hanging
+    setTimeout(() => {
+        resolve(window.speechSynthesis.getVoices());
+    }, 2000);
+  });
+};
+
+export const speak = async (text: string, language: string, onEnd: () => void) => {
   if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
     console.warn('Speech synthesis not supported');
     onEnd();
@@ -18,21 +40,46 @@ export const speak = (text: string, language: string, onEnd: () => void) => {
   // Also stop Web Audio if playing to prevent overlapping audio
   stopGlobalAudio();
 
+  // Wait for voices to load properly
+  const voices = await waitForVoices();
+
   const utterance = new SpeechSynthesisUtterance(text);
 
-  // Map app languages to BCP 47 tags for proper accent/voice
+  // Improved Voice Selection Logic
   const langMap: Record<string, string> = {
-    'en': 'en-IN', // Indian English
-    'te': 'te-IN', // Telugu
-    'hi': 'hi-IN', // Hindi
-    'ta': 'ta-IN', // Tamil
-    'kn': 'kn-IN'  // Kannada
+    'en': 'en-IN',
+    'te': 'te-IN',
+    'hi': 'hi-IN',
+    'ta': 'ta-IN',
+    'kn': 'kn-IN'
   };
 
-  utterance.lang = langMap[language] || 'en-US';
-  utterance.rate = 0.9; // Slightly slower for better clarity
-  utterance.pitch = 1.0;
+  const targetLang = langMap[language] || 'en-US';
+  
+  // 1. Exact match (e.g., te-IN)
+  let selectedVoice = voices.find(v => v.lang === targetLang);
+  
+  // 2. Loose match (e.g., any 'te' voice)
+  if (!selectedVoice) {
+      const shortLang = language; // 'te', 'hi', etc.
+      selectedVoice = voices.find(v => v.lang.startsWith(shortLang));
+  }
+  
+  // 3. Fallback to English India
+  if (!selectedVoice) {
+      selectedVoice = voices.find(v => v.lang === 'en-IN');
+  }
 
+  if (selectedVoice) {
+    utterance.voice = selectedVoice;
+    console.log(`Using voice: ${selectedVoice.name} (${selectedVoice.lang})`);
+  } else {
+    console.warn(`No voice found for ${targetLang}, using default.`);
+  }
+
+  // Rate correction
+  utterance.rate = 0.9;
+  
   utterance.onend = () => {
     onEnd();
   };
@@ -53,9 +100,9 @@ let globalSource: AudioBufferSourceNode | null = null;
 export const audioCache: Record<string, AudioBuffer> = {};
 
 // --- IndexedDB for Persistent Caching ---
-// Bumped version to v10 to invalidate old caches
-const DB_NAME = 'GovindaMitraAudioDB_v10';
-const DB_VERSION = 10;
+// Bumped version to v11 to invalidate old caches
+const DB_NAME = 'GovindaMitraAudioDB_v11';
+const DB_VERSION = 11;
 const STORE_NAME = 'audio_store';
 
 const openDB = (): Promise<IDBDatabase> => {
@@ -168,12 +215,7 @@ export async function decodeAudioData(
     throw new Error('Invalid audio data');
   }
 
-  // Create a safe view of the data. 
-  // We calculate the length strictly based on 16-bit alignment.
   const length = Math.floor(data.byteLength / 2);
-
-  // Using data.buffer directly can be dangerous if 'data' is a subarray or odd-length.
-  // We pass byteOffset and explicit length to be safe.
   const dataInt16 = new Int16Array(data.buffer, data.byteOffset, length);
 
   const frameCount = Math.floor(length / numChannels);
@@ -181,13 +223,11 @@ export async function decodeAudioData(
     throw new Error('Invalid frame count derived from audio data');
   }
 
-  // We specify the sampleRate here (e.g., 24000) so the browser knows the speed of the source audio.
   const buffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
 
   for (let channel = 0; channel < numChannels; channel++) {
     const channelData = buffer.getChannelData(channel);
     for (let i = 0; i < frameCount; i++) {
-      // Convert PCM 16-bit int to float [-1.0, 1.0]
       channelData[i] = (dataInt16[i * numChannels + channel] || 0) / 32768.0;
     }
   }
@@ -198,7 +238,6 @@ export function playGlobalAudio(buffer: AudioBuffer, onEnded?: () => void) {
   stopGlobalAudio(); // Stop any existing audio
   const ctx = getGlobalAudioContext();
 
-  // Resume context if suspended (browsers often suspend audio contexts created before user interaction)
   if (ctx.state === 'suspended') {
       ctx.resume().catch(e => console.error("Failed to resume audio context", e));
   }
@@ -215,8 +254,6 @@ export function playGlobalAudio(buffer: AudioBuffer, onEnded?: () => void) {
 
 export function stopGlobalAudio() {
   if (globalSource) {
-    // CRITICAL: Remove onended listener before stopping to prevent 
-    // unintended callbacks (like setting state to stopped when switching tracks)
     try {
       globalSource.onended = null;
     } catch (_) {}
@@ -230,7 +267,6 @@ export function stopGlobalAudio() {
     } catch (_) {}
     globalSource = null;
   }
-  // Also ensure native synthesis is stopped if this is called generically
   stopNativeAudio();
 }
 

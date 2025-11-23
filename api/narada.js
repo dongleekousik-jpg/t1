@@ -1,14 +1,33 @@
 import { GoogleGenAI } from "@google/genai";
 
 export default async function handler(req, res) {
+  // Handle CORS for Vercel if necessary (usually handled by rewrite, but good safety)
+  res.setHeader('Access-Control-Allow-Credentials', true);
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version'
+  );
+
+  if (req.method === 'OPTIONS') {
+    res.status(200).end();
+    return;
+  }
+
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method Not Allowed' });
   }
 
-  const apiKey = process.env.API_KEY;
+  // Robust API Key check: Try common names
+  const apiKey = process.env.API_KEY || process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY;
+
   if (!apiKey) {
-    console.error("API Key missing in environment variables");
-    return res.status(500).json({ error: 'Server API Key not configured' });
+    console.error("CRITICAL: API Key missing in Vercel Environment Variables.");
+    return res.status(500).json({ 
+      error: 'Server Configuration Error', 
+      details: 'API_KEY is missing in Vercel Environment Variables. Please add it in Settings.' 
+    });
   }
 
   const { text, language } = req.body;
@@ -74,7 +93,7 @@ export default async function handler(req, res) {
     res.status(200).json({ text: generatedText, mapLink, webLinks });
   } catch (error) {
     console.error('Narada API Error:', error);
-    // Return the actual error message for debugging purposes (in production, might want to sanitize this)
+    // Return the actual error message for debugging purposes
     res.status(500).json({ error: 'Failed to generate response', details: error.message });
   }
 }

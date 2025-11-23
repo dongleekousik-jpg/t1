@@ -26,13 +26,6 @@ const NaradaChat: React.FC = () => {
     chatPanelRef.current?.scrollTo(0, chatPanelRef.current.scrollHeight);
   }, [messages]);
 
-  /**
-   * NOTE:
-   * - Removed direct GoogleGenAI client usage from client-side code.
-   * - Instead this client posts to a backend endpoint (e.g. /api/narada)
-   *   which should call the actual Google API securely (server-side).
-   * - This keeps API keys off the client and is portable to any host.
-   */
   const handleSendMessage = async (text: string) => {
     if (!text.trim()) return;
 
@@ -46,9 +39,6 @@ const NaradaChat: React.FC = () => {
     setIsLoading(true);
 
     try {
-      // POST to a local backend route which should handle the secure call to Google / Gemini.
-      // Implement this endpoint on your server (e.g., /api/narada) and return JSON:
-      // { text: string, mapLink?: string, webLinks?: [{ title: string, uri: string }] }
       const res = await fetch('/api/narada', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -56,13 +46,12 @@ const NaradaChat: React.FC = () => {
       });
 
       if (!res.ok) {
-        // Try to parse error details
         let errorDetails = `Status: ${res.status}`;
         try {
             const errorJson = await res.json();
-            if (errorJson.error) errorDetails += ` - ${errorJson.error}`;
-            if (errorJson.details) errorDetails += ` (${errorJson.details})`;
-        } catch (e) { /* ignore parse error */ }
+            if (errorJson.details) errorDetails = errorJson.details;
+            else if (errorJson.error) errorDetails = errorJson.error;
+        } catch (e) { /* ignore */ }
         throw new Error(errorDetails);
       }
 
@@ -83,10 +72,17 @@ const NaradaChat: React.FC = () => {
 
     } catch (error: any) {
       console.error('Error contacting backend Narada endpoint:', error);
+      
+      let errorText = `My apologies, devotee. I am having trouble connecting to the divine realms. (Error: ${error.message})`;
+      
+      if (error.message.includes("API_KEY is missing")) {
+          errorText = "Setup Error: The server API Key is missing. Please add 'API_KEY' to your Vercel Project Settings > Environment Variables.";
+      }
+
       const errorMessage: ChatMessage = {
         id: (Date.now() + 1).toString(),
         sender: 'narada',
-        text: `My apologies, devotee. I am having trouble connecting to the divine realms. (Error: ${error.message || 'Unknown'})`,
+        text: errorText,
       };
       setMessages((prev) => [...prev, errorMessage]);
     } finally {
@@ -94,10 +90,8 @@ const NaradaChat: React.FC = () => {
     }
   };
 
-  // Using the vector logo (Icon) exclusively for reliability
   const Avatar = ({ className }: { className: string }) => (
     <img
-      //src="https://raw.githubusercontent.com/kousik4215/tirupati-images/main/naradha.jpg"
       src="https://raw.githubusercontent.com/kousik4215/tirupati-images/main/Nrada%20rushi.jpg"
       alt="Narada Avatar"
       className={`${className} object-cover rounded-full`}

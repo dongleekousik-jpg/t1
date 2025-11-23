@@ -1,14 +1,33 @@
 import { GoogleGenAI, Modality } from "@google/genai";
 
 export default async function handler(req, res) {
+  // Handle CORS
+  res.setHeader('Access-Control-Allow-Credentials', true);
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version'
+  );
+
+  if (req.method === 'OPTIONS') {
+    res.status(200).end();
+    return;
+  }
+
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method Not Allowed' });
   }
 
-  const apiKey = process.env.API_KEY;
+  // Robust API Key check
+  const apiKey = process.env.API_KEY || process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY;
+
   if (!apiKey) {
-    console.error("API Key missing");
-    return res.status(500).json({ error: 'Server API Key not configured' });
+    console.error("CRITICAL: API Key missing in Vercel Environment Variables.");
+    return res.status(500).json({ 
+      error: 'Server Configuration Error', 
+      details: 'API_KEY is missing in Vercel Environment Variables.' 
+    });
   }
 
   let { text } = req.body;
@@ -18,7 +37,6 @@ export default async function handler(req, res) {
   }
 
   // Optimize text length for speed and timeout prevention
-  // Gemini TTS can handle more, but Vercel functions have a 10s limit on free tier
   if (text.length > 400) {
       const parts = text.split('.');
       let truncated = "";
