@@ -1,4 +1,4 @@
-// RulesSection.tsx
+
 import React from 'react';
 import { useLanguage } from '../App';
 import { Icon, IconName } from '../constants/icons';
@@ -18,6 +18,7 @@ const RuleCard: React.FC<{ ruleId: string; icon: IconName }> = ({ ruleId, icon }
     </div>
   );
 };
+
 
 const RulesSection: React.FC = () => {
   const { t } = useLanguage();

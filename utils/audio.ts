@@ -1,4 +1,4 @@
-// utils/audio.ts
+
 
 export const stopNativeAudio = () => {
   if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
@@ -6,29 +6,24 @@ export const stopNativeAudio = () => {
   }
 };
 
-// Helper to wait for voices to be loaded (Async with polling)
+// Helper to wait for voices to be loaded by the browser
 const waitForVoices = (): Promise<SpeechSynthesisVoice[]> => {
   return new Promise((resolve) => {
-    let voices = window.speechSynthesis.getVoices();
+    const voices = window.speechSynthesis.getVoices();
     if (voices.length > 0) {
       resolve(voices);
       return;
     }
     
-    // Poll for voices every 100ms
-    const intervalId = setInterval(() => {
-        voices = window.speechSynthesis.getVoices();
-        if (voices.length > 0) {
-            clearInterval(intervalId);
-            resolve(voices);
-        }
-    }, 100);
+    // Safety timeout of 3s in case onvoiceschanged never fires
+    const timeoutId = setTimeout(() => {
+        resolve(window.speechSynthesis.getVoices()); 
+    }, 3000);
 
-    // Timeout fallback after 2 seconds
-    setTimeout(() => {
-        clearInterval(intervalId);
-        resolve(window.speechSynthesis.getVoices());
-    }, 2000);
+    window.speechSynthesis.onvoiceschanged = () => {
+      clearTimeout(timeoutId);
+      resolve(window.speechSynthesis.getVoices());
+    };
   });
 };
 
@@ -44,58 +39,65 @@ export const speak = async (text: string, language: string, onEnd: () => void) =
   // Also stop Web Audio if playing to prevent overlapping audio
   stopGlobalAudio();
 
-  // Wait for voices to load properly
-  const voices = await waitForVoices();
+  try {
+    const voices = await waitForVoices();
+    const utterance = new SpeechSynthesisUtterance(text);
 
-  const utterance = new SpeechSynthesisUtterance(text);
+    // Map app languages to BCP 47 tags
+    const langCodeMap: Record<string, string> = {
+      'en': 'en-IN',
+      'te': 'te-IN',
+      'hi': 'hi-IN',
+      'ta': 'ta-IN',
+      'kn': 'kn-IN'
+    };
 
-  // Map app language codes to BCP 47 tags
-  const langMap: Record<string, string> = {
-    'en': 'en-IN', // Prefer Indian English
-    'te': 'te-IN',
-    'hi': 'hi-IN',
-    'ta': 'ta-IN',
-    'kn': 'kn-IN'
-  };
+    const targetLang = langCodeMap[language] || 'en-US';
+    utterance.lang = targetLang;
+    utterance.rate = 0.9; 
+    utterance.pitch = 1.0;
 
-  const targetLang = langMap[language] || 'en-US';
-  
-  // Voice Selection Strategy:
-  // 1. Exact BCP 47 match (e.g. 'te-IN')
-  let selectedVoice = voices.find(v => v.lang === targetLang);
-  
-  // 2. Fuzzy match by language code (e.g. 'te' matches 'te_IN' or 'tel')
-  if (!selectedVoice) {
-      // Normalize voice lang (replace _ with -) and check inclusion
-      selectedVoice = voices.find(v => v.lang.replace('_', '-').toLowerCase().startsWith(language.toLowerCase()));
-  }
+    // Smart Voice Selection
+    // 1. Try exact match (e.g., Telugu India)
+    let selectedVoice = voices.find(v => v.lang === targetLang);
+    
+    // 2. If not found, try match by language code only (e.g., 'te')
+    if (!selectedVoice) {
+        const shortLang = targetLang.split('-')[0];
+        selectedVoice = voices.find(v => v.lang.startsWith(shortLang));
+    }
 
-  // 3. Fallback to any English voice if specific language not found
-  if (!selectedVoice) {
-      console.warn(`Voice for ${language} not found, falling back to English.`);
-      selectedVoice = voices.find(v => v.lang.includes('en'));
-  }
+    // 3. Fallback to Hindi for Indian languages if specific regional voice is missing (better than English)
+    if (!selectedVoice && ['te', 'ta', 'kn'].includes(language)) {
+         selectedVoice = voices.find(v => v.lang === 'hi-IN');
+    }
 
-  if (selectedVoice) {
-    utterance.voice = selectedVoice;
-    // utterance.lang needs to match the voice to ensure correct pronunciation rules
-    utterance.lang = selectedVoice.lang; 
-    console.log(`Using voice: ${selectedVoice.name} (${selectedVoice.lang})`);
-  } 
+    // 4. Fallback to any English voice
+    if (!selectedVoice) {
+        selectedVoice = voices.find(v => v.lang.startsWith('en'));
+    }
 
-  // Rate correction
-  utterance.rate = 0.9;
-  
-  utterance.onend = () => {
+    if (selectedVoice) {
+        utterance.voice = selectedVoice;
+        // console.log(`Speaking with voice: ${selectedVoice.name} (${selectedVoice.lang})`);
+    } else {
+        console.warn('No suitable voice found, using default.');
+    }
+
+    utterance.onend = () => {
+      onEnd();
+    };
+
+    utterance.onerror = (e) => {
+      console.error('TTS Error:', e);
+      onEnd();
+    };
+
+    window.speechSynthesis.speak(utterance);
+  } catch (err) {
+    console.error("Speak failed", err);
     onEnd();
-  };
-
-  utterance.onerror = (e) => {
-    console.error('TTS Error:', e);
-    onEnd();
-  };
-
-  window.speechSynthesis.speak(utterance);
+  }
 };
 
 // Web Audio API implementation for Gemini TTS
@@ -106,8 +108,9 @@ let globalSource: AudioBufferSourceNode | null = null;
 export const audioCache: Record<string, AudioBuffer> = {};
 
 // --- IndexedDB for Persistent Caching ---
-const DB_NAME = 'GovindaMitraAudioDB_v12'; // Increment version to clear old cache
-const DB_VERSION = 12;
+// Bumped version to v10 to invalidate old caches
+const DB_NAME = 'GovindaMitraAudioDB_v10';
+const DB_VERSION = 1;
 const STORE_NAME = 'audio_store';
 
 const openDB = (): Promise<IDBDatabase> => {
@@ -159,10 +162,10 @@ export const getAudioFromDB = async (key: string): Promise<string | null> => {
 
 export function getGlobalAudioContext(): AudioContext {
   if (!globalAudioContext) {
-    const AudioContextClass = (window as any).AudioContext || (window as any).webkitAudioContext;
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
     globalAudioContext = new AudioContextClass();
   }
-  return globalAudioContext as AudioContext;
+  return globalAudioContext;
 }
 
 // Critical for mobile: Unlock audio context on user interaction
@@ -215,25 +218,23 @@ export async function decodeAudioData(
   sampleRate: number,
   numChannels: number,
 ): Promise<AudioBuffer> {
-  // Guard against very small/invalid buffers
-  if (!data || data.byteLength < 2) {
-    throw new Error('Invalid audio data');
-  }
-
+  // Create a safe view of the data. 
+  // We calculate the length strictly based on 16-bit alignment.
   const length = Math.floor(data.byteLength / 2);
+  
+  // Using data.buffer directly can be dangerous if 'data' is a subarray or odd-length.
+  // We pass byteOffset and explicit length to be safe.
   const dataInt16 = new Int16Array(data.buffer, data.byteOffset, length);
-
-  const frameCount = Math.floor(length / numChannels);
-  if (frameCount <= 0) {
-    throw new Error('Invalid frame count derived from audio data');
-  }
-
+  
+  const frameCount = length / numChannels;
+  // We specify the sampleRate here (e.g., 24000) so the browser knows the speed of the source audio.
   const buffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
 
   for (let channel = 0; channel < numChannels; channel++) {
     const channelData = buffer.getChannelData(channel);
     for (let i = 0; i < frameCount; i++) {
-      channelData[i] = (dataInt16[i * numChannels + channel] || 0) / 32768.0;
+      // Convert PCM 16-bit int to float [-1.0, 1.0]
+      channelData[i] = dataInt16[i * numChannels + channel] / 32768.0;
     }
   }
   return buffer;
@@ -242,7 +243,8 @@ export async function decodeAudioData(
 export function playGlobalAudio(buffer: AudioBuffer, onEnded?: () => void) {
   stopGlobalAudio(); // Stop any existing audio
   const ctx = getGlobalAudioContext();
-
+  
+  // Resume context if suspended (browsers often suspend audio contexts created before user interaction)
   if (ctx.state === 'suspended') {
       ctx.resume().catch(e => console.error("Failed to resume audio context", e));
   }
@@ -259,30 +261,29 @@ export function playGlobalAudio(buffer: AudioBuffer, onEnded?: () => void) {
 
 export function stopGlobalAudio() {
   if (globalSource) {
-    try {
-      globalSource.onended = null;
-    } catch (_) {}
+    // CRITICAL: Remove onended listener before stopping to prevent 
+    // unintended callbacks (like setting state to stopped when switching tracks)
+    globalSource.onended = null;
     try {
       globalSource.stop();
     } catch (e) {
       // Ignore errors if already stopped
     }
-    try {
-      globalSource.disconnect();
-    } catch (_) {}
+    globalSource.disconnect();
     globalSource = null;
   }
+  // Also ensure native synthesis is stopped if this is called generically
   stopNativeAudio();
 }
 
 export function pauseGlobalAudio() {
   if (globalAudioContext && globalAudioContext.state === 'running') {
-    globalAudioContext.suspend().catch(() => {});
+    globalAudioContext.suspend();
   }
 }
 
 export function resumeGlobalAudio() {
   if (globalAudioContext && globalAudioContext.state === 'suspended') {
-    globalAudioContext.resume().catch(() => {});
+    globalAudioContext.resume();
   }
 }

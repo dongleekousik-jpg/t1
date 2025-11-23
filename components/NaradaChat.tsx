@@ -1,5 +1,6 @@
-// NaradaChat.tsx
+
 import React, { useState, useRef, useEffect } from 'react';
+import { GoogleGenAI } from '@google/genai';
 import { useLanguage } from '../App';
 import { ChatMessage } from '../types';
 import { Icon } from '../constants/icons';
@@ -39,50 +40,77 @@ const NaradaChat: React.FC = () => {
     setIsLoading(true);
 
     try {
-      const res = await fetch('/api/narada', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, language }),
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+      
+      const contents = `Current language is ${language}. User asks: "${text}"`;
+          
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents,
+        config: {
+            tools: [{googleSearch: {}}, {googleMaps: {}}],
+            systemInstruction: `You are Narada, a wise and devotional guide for Tirumala and Tirupati pilgrims.
+
+            CORE RESPONSIBILITIES:
+            - Provide accurate, up-to-date information about Tirumala Tirupati Devasthanams (TTD).
+            - Assist with Darshan timings, accommodation (CRO, Cottages), Sevas, and travel logistics within Tirupati/Tirumala.
+            - Explain the spiritual significance of places like Srivari Temple, Papavinasanam, Akasha Ganga, etc.
+
+            STRICT GUIDELINES:
+            1. **ACCURACY IS PARAMOUNT**: 
+               - For questions about **Darshan timings, Ticket availability, Special Entry Darshan (SED), Online Booking, or Current Crowd Status**, you MUST use the 'googleSearch' tool to find the latest official TTD updates.
+               - Do not guess specific timings, prices, or rules if you are not sure; instead, state that you are checking the latest info.
+            
+            2. **SCOPE**: 
+               - Answer ONLY regarding Tirumala, Tirupati, and related pilgrimage topics.
+               - If asked about other topics, politely redirect the devotee to the sacred purpose of this app.
+
+            3. **CONTEXTUAL UNDERSTANDING**: 
+               - "Accommodation" or "Rooms" ALWAYS refers to TTD cottages/guest houses or hotels in Tirupati/Tirumala.
+               - "Darshan" refers to Lord Venkateswara's darshan.
+
+            4. **TONE & STYLE**: 
+               - Address the user as "Devotee" or "Swami".
+               - Be polite, humble, and helpful.
+               - Keep answers **concise and direct** (max 3-4 sentences) unless a detailed procedure is asked.
+
+            5. **LANGUAGE**: 
+               - Respond in ${language}. If the query is in another language, adapt, but primarily use the requested language context.`
+        },
       });
+      
+      const naradaText = response.text || "I am unable to formulate a response at this moment.";
+      const groundingChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
+      
+      let mapLink: string | undefined = undefined;
+      const webLinks: { title: string; uri: string }[] = [];
 
-      if (!res.ok) {
-        let errorDetails = `Status: ${res.status}`;
-        try {
-            const errorJson = await res.json();
-            if (errorJson.details) errorDetails = errorJson.details;
-            else if (errorJson.error) errorDetails = errorJson.error;
-        } catch (e) { /* ignore */ }
-        throw new Error(errorDetails);
+      if (groundingChunks) {
+          for (const chunk of groundingChunks) {
+              if (chunk.maps) {
+                  mapLink = chunk.maps.uri;
+              }
+              if (chunk.web) {
+                  webLinks.push({ title: chunk.web.title || 'Source', uri: chunk.web.uri });
+              }
+          }
       }
-
-      const data = await res.json();
-
-      const naradaText: string = data?.text || "I am unable to formulate a response at this moment.";
-      const mapLink: string | undefined = data?.mapLink;
-      const webLinks: { title: string; uri: string }[] | undefined = data?.webLinks;
-
+      
       const naradaMessage: ChatMessage = {
         id: (Date.now() + 1).toString(),
         sender: 'narada',
         text: naradaText,
-        mapLink,
-        webLinks,
+        mapLink: mapLink,
+        webLinks: webLinks.length > 0 ? webLinks : undefined
       };
       setMessages((prev) => [...prev, naradaMessage]);
 
-    } catch (error: any) {
-      console.error('Error contacting backend Narada endpoint:', error);
-      
-      let errorText = `My apologies, devotee. I am having trouble connecting to the divine realms. (Error: ${error.message})`;
-      
-      if (error.message.includes("API_KEY is missing")) {
-          errorText = "Setup Error: The server API Key is missing. Please add 'API_KEY' to your Vercel Project Settings > Environment Variables.";
-      }
-
+    } catch (error) {
+      console.error('Error with Gemini API:', error);
       const errorMessage: ChatMessage = {
         id: (Date.now() + 1).toString(),
         sender: 'narada',
-        text: errorText,
+        text: 'My apologies, devotee. I am having trouble connecting to the divine realms. Please try again later.',
       };
       setMessages((prev) => [...prev, errorMessage]);
     } finally {
@@ -90,13 +118,16 @@ const NaradaChat: React.FC = () => {
     }
   };
 
+  // Using the vector logo (Icon) exclusively for reliability
   const Avatar = ({ className }: { className: string }) => (
-    <img
-      src="https://raw.githubusercontent.com/kousik4215/tirupati-images/main/Nrada%20rushi.jpg"
-      alt="Narada Avatar"
-      className={`${className} object-cover rounded-full`}
-    />
-  );
+  <img
+    //src="https://raw.githubusercontent.com/kousik4215/tirupati-images/main/naradha.jpg"
+    src="https://raw.githubusercontent.com/kousik4215/tirupati-images/main/Nrada%20rushi.jpg"
+    alt="Narada Avatar"
+    className={`${className} object-cover rounded-full`}
+  />
+);
+
 
   return (
     <>

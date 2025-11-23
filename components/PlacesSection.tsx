@@ -1,6 +1,7 @@
-// PlacesSection.tsx
+
 
 import React, { useState, useEffect, useRef } from 'react';
+import { GoogleGenAI, Modality } from '@google/genai';
 import { useLanguage } from '../App';
 import { Place } from '../types';
 import { Icon } from '../constants/icons';
@@ -234,43 +235,43 @@ const PlacesSection: React.FC<PlacesSectionProps> = ({ title, places, isSpiritua
              throw new Error("No content to speak");
           }
 
-          // IMPORTANT:
-          // - Removed direct GoogleGenAI client usage from client-side.
-          // - POST to a secure backend endpoint that performs TTS (server-side) and returns base64 audio.
-          // - Implement /api/generate-tts (or similar) on your server to call Google/other TTS securely.
-          let base64Audio: string | undefined = undefined;
+          const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+          let response;
           try {
-              const res = await fetch('/api/generate-tts', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ text: textToSpeak, language, cacheKey }),
+              response = await ai.models.generateContent({
+                  model: "gemini-2.5-flash-preview-tts",
+                  contents: [{ parts: [{ text: textToSpeak }] }],
+                  config: {
+                      responseModalities: [Modality.AUDIO],
+                      speechConfig: {
+                          voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } },
+                      },
+                  },
               });
-
-              if (res.ok) {
-                const json = await res.json();
-                base64Audio = json?.base64Audio;
-              } else {
-                console.warn('TTS backend responded with', res.status);
-              }
           } catch (err) {
-              console.warn('TTS backend request failed', err);
+             console.warn("Primary TTS request failed, attempting fallback", err);
           }
 
-          // FALLBACK 1: If backend didn't return audio, attempt a simplified request to backend
+          let base64Audio = response?.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+          
+          // FALLBACK 1: If full text fails (e.g. safety filters), try just the name and simple text
           if (!base64Audio) {
+              console.log("Retrying with simplified text...");
               const simpleText = `${name}. Please visit this sacred place.`.replace(/["']/g, "").trim();
               try {
-                const res2 = await fetch('/api/generate-tts', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ text: simpleText, language, cacheKey }),
+                const retryResponse = await ai.models.generateContent({
+                    model: "gemini-2.5-flash-preview-tts",
+                    contents: [{ parts: [{ text: simpleText }] }],
+                    config: {
+                        responseModalities: [Modality.AUDIO],
+                        speechConfig: {
+                            voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } },
+                        },
+                    },
                 });
-                if (res2.ok) {
-                  const json2 = await res2.json();
-                  base64Audio = json2?.base64Audio;
-                }
+                base64Audio = retryResponse.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
               } catch (retryErr) {
-                 console.error("Retry to TTS backend failed", retryErr);
+                 console.error("Retry failed", retryErr);
               }
           }
 
@@ -293,10 +294,10 @@ const PlacesSection: React.FC<PlacesSectionProps> = ({ title, places, isSpiritua
                    setPlayingPlaceId(place.id);
               }
           } else {
-              throw new Error("No audio data received from TTS backend after retry");
+              throw new Error("No audio data received from API after retry");
           }
       } catch (error) {
-          console.warn("TTS generation failed, falling back to native browser TTS", error);
+          console.warn("Gemini TTS failed completely, falling back to native browser TTS", error);
           
           // FALLBACK 2: Native Browser TTS (Last Resort)
           if (activeRequestId.current === requestId && isMounted.current) {

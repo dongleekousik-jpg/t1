@@ -1,6 +1,7 @@
-// VirtualGuide.tsx
+
 
 import React, { useState, useEffect, useRef } from 'react';
+import { GoogleGenAI, Modality } from '@google/genai';
 import { useLanguage } from '../App';
 import { 
     decode, 
@@ -43,53 +44,54 @@ const VirtualGuide: React.FC<VirtualGuideProps> = ({ placeId, placeContent, onCl
   const fetchAndPlayAudio = async () => {
     try {
         setLoading(true);
+        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
 
         const textToSpeak = `${placeContent.name}. ${placeContent.importance}`.trim();
 
-        // IMPORTANT: Do not call any cloud API directly from the client.
-        // Instead POST to your backend route (e.g., /api/generate-tts) which securely
-        // calls the TTS provider and returns base64 audio.
-        let base64Audio: string | undefined = undefined;
+        let response;
         try {
-          const res = await fetch('/api/generate-tts', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text: textToSpeak, language, cacheKey }),
-          });
-
-          if (res.ok) {
-            const json = await res.json();
-            base64Audio = json?.base64Audio;
-          } else {
-            console.warn('TTS backend responded with', res.status);
-          }
+            response = await ai.models.generateContent({
+              model: "gemini-2.5-flash-preview-tts",
+              contents: [{ parts: [{ text: textToSpeak }] }],
+              config: {
+                responseModalities: [Modality.AUDIO],
+                speechConfig: {
+                  voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } },
+                },
+              },
+            });
         } catch (err) {
-          console.warn('TTS backend request failed', err);
+            console.warn("Primary TTS failed in Virtual Guide", err);
         }
 
-        // FALLBACK 1: Try simplified text if full text failed
+        let base64Audio = response?.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+        
+        // FALLBACK 1
         if (!base64Audio) {
-          const simpleText = `${placeContent.name}. Please visit this holy place.`.trim();
-          try {
-            const res2 = await fetch('/api/generate-tts', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ text: simpleText, language, cacheKey }),
-            });
-            if (res2.ok) {
-              const json2 = await res2.json();
-              base64Audio = json2?.base64Audio;
+            console.log("Retrying with simplified text in Virtual Guide...");
+            const simpleText = `${placeContent.name}. Please visit this holy place.`.trim();
+             try {
+                const retryResponse = await ai.models.generateContent({
+                  model: "gemini-2.5-flash-preview-tts",
+                  contents: [{ parts: [{ text: simpleText }] }],
+                  config: {
+                    responseModalities: [Modality.AUDIO],
+                    speechConfig: {
+                      voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } },
+                    },
+                  },
+                });
+                base64Audio = retryResponse.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+            } catch (retryErr) {
+                 console.error("Retry failed in Virtual Guide", retryErr);
             }
-          } catch (retryErr) {
-            console.error("Retry to TTS backend failed", retryErr);
-          }
         }
 
         if (base64Audio && isMounted.current) {
             const ctx = getGlobalAudioContext();
             const audioBuffer = await decodeAudioData(decode(base64Audio), ctx, 24000, 1);
             
-            // Save to in-memory cache for future
+            // Save to cache
             audioCache[cacheKey] = audioBuffer;
             
             // Play only if still mounted
@@ -100,12 +102,12 @@ const VirtualGuide: React.FC<VirtualGuideProps> = ({ placeId, placeContent, onCl
                 setStatus('playing');
             }
         } else {
-            throw new Error("No audio generated from TTS backend");
+            throw new Error("No audio generated");
         }
     } catch (error) {
-        console.warn("TTS generation failed, switching to native TTS", error);
+        console.warn("Gemini TTS failed, switching to native TTS", error);
         
-        // FALLBACK 2: Native Browser TTS
+        // FALLBACK 2: Native TTS
         if (isMounted.current) {
             const textToSpeak = `${placeContent.name}. ${placeContent.importance}`.trim();
             speak(textToSpeak, language, () => {

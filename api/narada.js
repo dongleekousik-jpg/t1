@@ -24,13 +24,14 @@ export default async function handler(req, res) {
 
   if (!apiKey) {
     console.error("CRITICAL: API Key missing in Vercel Environment Variables.");
+    // Return specific error structure for frontend to detect
     return res.status(500).json({ 
       error: 'Server Configuration Error', 
       details: 'API_KEY is missing in Vercel Environment Variables. Please add it in Settings.' 
     });
   }
 
-  // Handle body parsing if Vercel doesn't do it automatically (rare, but good safety)
+  // Handle body parsing
   let body = req.body;
   if (typeof body === 'string') {
     try {
