@@ -88,7 +88,8 @@ export const speak = async (text: string, language: string, onEnd: () => void) =
 
         const utterance = new SpeechSynthesisUtterance(chunkText);
         utterance.lang = targetLang;
-        utterance.rate = 0.9;
+        // Slower rate for more "realistic" and clear enunciation
+        utterance.rate = 0.85; 
         utterance.pitch = 1.0;
         if (selectedVoice) {
             utterance.voice = selectedVoice;

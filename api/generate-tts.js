@@ -19,14 +19,21 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method Not Allowed' });
   }
 
-  // Robust API Key check
-  const apiKey = (process.env.API_KEY || process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || "").trim();
+  // Robust API Key check - checking all common variations
+  const apiKey = (
+    process.env.API_KEY || 
+    process.env.GOOGLE_API_KEY || 
+    process.env.GEMINI_API_KEY || 
+    process.env.VITE_API_KEY || 
+    process.env.NEXT_PUBLIC_API_KEY || 
+    ""
+  ).trim();
 
   if (!apiKey) {
     console.error("CRITICAL: API Key missing in Vercel Environment Variables.");
     return res.status(500).json({ 
       error: 'Server Configuration Error', 
-      details: 'API_KEY is missing in Vercel Environment Variables.' 
+      details: 'API_KEY is missing. If you added it recently, you MUST REDEPLOY the project for changes to apply.' 
     });
   }
 
@@ -46,7 +53,7 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'No text provided' });
   }
 
-  // Optimize text length for speed and timeout prevention
+  // Optimize text length
   if (text.length > 400) {
       const parts = text.split('.');
       let truncated = "";
@@ -57,7 +64,7 @@ export default async function handler(req, res) {
               break;
           }
       }
-      text = truncated || text.substring(0, 400); // Fallback if split fails
+      text = truncated || text.substring(0, 400); 
   }
 
   try {
@@ -71,10 +78,10 @@ export default async function handler(req, res) {
         responseModalities: [Modality.AUDIO],
         speechConfig: {
             voiceConfig: {
-              prebuiltVoiceConfig: { voiceName: 'Kore' },
+              // 'Puck' often sounds more natural/authoritative for a guide than 'Kore'
+              prebuiltVoiceConfig: { voiceName: 'Puck' },
             },
         },
-        // Disable safety settings to prevent blocking religious texts
         safetySettings: [
             { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
             { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },

@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect } from 'react';
 import { useLanguage } from '../App';
 import { ChatMessage } from '../types';
@@ -53,7 +52,7 @@ const NaradaChat: React.FC = () => {
 
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.error || `Server error: ${response.status}`);
+        throw new Error(errorData.details || errorData.error || `Server error: ${response.status}`);
       }
 
       const data = await response.json();
@@ -71,8 +70,12 @@ const NaradaChat: React.FC = () => {
       console.error('Error with Chat API:', error);
       let errorText = 'My apologies, devotee. I am having trouble connecting to the divine realms. Please try again later.';
       
-      if (error instanceof Error && (error.message.includes('Configuration Error') || error.message.includes('500'))) {
-          errorText = "Setup Error: The server API Key is missing. Please add 'API_KEY' to your Vercel Project Settings > Environment Variables.";
+      if (error instanceof Error) {
+          if (error.message.includes('API_KEY is missing')) {
+              errorText = "Setup Error: API Key missing. If you added it to Vercel Settings, please REDEPLOY your project for it to take effect.";
+          } else {
+              errorText = `Error: ${error.message}`;
+          }
       }
 
       const errorMessage: ChatMessage = {

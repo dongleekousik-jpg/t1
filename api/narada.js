@@ -20,14 +20,20 @@ export default async function handler(req, res) {
   }
 
   // Robust API Key check
-  const apiKey = (process.env.API_KEY || process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || "").trim();
+  const apiKey = (
+    process.env.API_KEY || 
+    process.env.GOOGLE_API_KEY || 
+    process.env.GEMINI_API_KEY || 
+    process.env.VITE_API_KEY || 
+    process.env.NEXT_PUBLIC_API_KEY || 
+    ""
+  ).trim();
 
   if (!apiKey) {
     console.error("CRITICAL: API Key missing in Vercel Environment Variables.");
-    // Return specific error structure for frontend to detect
     return res.status(500).json({ 
       error: 'Server Configuration Error', 
-      details: 'API_KEY is missing in Vercel Environment Variables. Please add it in Settings.' 
+      details: 'API_KEY is missing. If you added it recently, you MUST REDEPLOY the project for changes to apply.' 
     });
   }
 
@@ -51,7 +57,7 @@ export default async function handler(req, res) {
     const ai = new GoogleGenAI({ apiKey });
     
     // Construct system instruction based on language
-    let systemInstruction = "You are Narada, the divine sage and devotee guide for Tirumala. Answer questions about the temple, rituals, and places with devotion and humility. Keep answers concise (under 100 words) to ensure quick responses. If the user asks about location, use the map tool.";
+    let systemInstruction = "You are Narada, the divine sage and devotee guide for Tirumala. Answer questions about the temple, rituals, and places with devotion and humility. Keep answers concise (under 100 words).";
     if (language === 'te') systemInstruction += " Reply in Telugu.";
     else if (language === 'hi') systemInstruction += " Reply in Hindi.";
     else if (language === 'ta') systemInstruction += " Reply in Tamil.";
@@ -66,14 +72,12 @@ export default async function handler(req, res) {
         systemInstruction,
         temperature: 0.7,
         maxOutputTokens: 300,
-        // Disable safety settings to prevent blocking religious content
         safetySettings: [
           { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
           { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
           { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
           { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
         ],
-        // Using Google Maps tool to provide location data
         tools: [{ googleMaps: {} }],
       }
     });
@@ -84,7 +88,7 @@ export default async function handler(req, res) {
         throw new Error("Empty response from AI model");
     }
     
-    // Extract map link if available from grounding metadata
+    // Extract map link if available
     let mapLink = undefined;
     const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
     if (chunks) {
@@ -92,16 +96,7 @@ export default async function handler(req, res) {
         if (mapChunk) mapLink = mapChunk.maps.uri;
     }
 
-    // Extract web links if available
-    let webLinks = undefined;
-    if (chunks) {
-        const webChunks = chunks.filter(c => c.web?.uri);
-        if (webChunks.length > 0) {
-            webLinks = webChunks.map(c => ({ title: c.web.title || 'Source', uri: c.web.uri }));
-        }
-    }
-
-    res.status(200).json({ text: generatedText, mapLink, webLinks });
+    res.status(200).json({ text: generatedText, mapLink });
   } catch (error) {
     console.error('Narada API Error:', error);
     res.status(500).json({ error: 'Failed to generate response', details: error.message });
