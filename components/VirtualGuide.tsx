@@ -1,7 +1,5 @@
 
-
 import React, { useState, useEffect, useRef } from 'react';
-import { GoogleGenAI, Modality } from '@google/genai';
 import { useLanguage } from '../App';
 import { 
     decode, 
@@ -44,48 +42,21 @@ const VirtualGuide: React.FC<VirtualGuideProps> = ({ placeId, placeContent, onCl
   const fetchAndPlayAudio = async () => {
     try {
         setLoading(true);
-        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
-
         const textToSpeak = `${placeContent.name}. ${placeContent.importance}`.trim();
 
-        let response;
-        try {
-            response = await ai.models.generateContent({
-              model: "gemini-2.5-flash-preview-tts",
-              contents: [{ parts: [{ text: textToSpeak }] }],
-              config: {
-                responseModalities: [Modality.AUDIO],
-                speechConfig: {
-                  voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } },
-                },
-              },
-            });
-        } catch (err) {
-            console.warn("Primary TTS failed in Virtual Guide", err);
+        // Call Serverless Function
+        const response = await fetch('/api/generate-tts', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: textToSpeak })
+        });
+
+        if (!response.ok) {
+            throw new Error(`TTS API failed: ${response.status}`);
         }
 
-        let base64Audio = response?.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-        
-        // FALLBACK 1
-        if (!base64Audio) {
-            console.log("Retrying with simplified text in Virtual Guide...");
-            const simpleText = `${placeContent.name}. Please visit this holy place.`.trim();
-             try {
-                const retryResponse = await ai.models.generateContent({
-                  model: "gemini-2.5-flash-preview-tts",
-                  contents: [{ parts: [{ text: simpleText }] }],
-                  config: {
-                    responseModalities: [Modality.AUDIO],
-                    speechConfig: {
-                      voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } },
-                    },
-                  },
-                });
-                base64Audio = retryResponse.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-            } catch (retryErr) {
-                 console.error("Retry failed in Virtual Guide", retryErr);
-            }
-        }
+        const data = await response.json();
+        const base64Audio = data.base64Audio;
 
         if (base64Audio && isMounted.current) {
             const ctx = getGlobalAudioContext();
@@ -105,9 +76,9 @@ const VirtualGuide: React.FC<VirtualGuideProps> = ({ placeId, placeContent, onCl
             throw new Error("No audio generated");
         }
     } catch (error) {
-        console.warn("Gemini TTS failed, switching to native TTS", error);
+        console.warn("Server TTS failed, switching to native TTS", error);
         
-        // FALLBACK 2: Native TTS
+        // FALLBACK: Native TTS
         if (isMounted.current) {
             const textToSpeak = `${placeContent.name}. ${placeContent.importance}`.trim();
             speak(textToSpeak, language, () => {

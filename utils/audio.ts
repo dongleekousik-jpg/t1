@@ -1,5 +1,4 @@
 
-
 export const stopNativeAudio = () => {
   if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
     window.speechSynthesis.cancel();
@@ -41,7 +40,6 @@ export const speak = async (text: string, language: string, onEnd: () => void) =
 
   try {
     const voices = await waitForVoices();
-    const utterance = new SpeechSynthesisUtterance(text);
 
     // Map app languages to BCP 47 tags
     const langCodeMap: Record<string, string> = {
@@ -53,49 +51,67 @@ export const speak = async (text: string, language: string, onEnd: () => void) =
     };
 
     const targetLang = langCodeMap[language] || 'en-US';
-    utterance.lang = targetLang;
-    utterance.rate = 0.9; 
-    utterance.pitch = 1.0;
 
     // Smart Voice Selection
-    // 1. Try exact match (e.g., Telugu India)
     let selectedVoice = voices.find(v => v.lang === targetLang);
-    
-    // 2. If not found, try match by language code only (e.g., 'te')
     if (!selectedVoice) {
         const shortLang = targetLang.split('-')[0];
         selectedVoice = voices.find(v => v.lang.startsWith(shortLang));
     }
-
-    // 3. Fallback to Hindi for Indian languages if specific regional voice is missing (better than English)
+    // Fallback to Hindi for Indian languages if specific regional voice is missing
     if (!selectedVoice && ['te', 'ta', 'kn'].includes(language)) {
          selectedVoice = voices.find(v => v.lang === 'hi-IN');
     }
-
-    // 4. Fallback to any English voice
+    // Fallback to any English voice
     if (!selectedVoice) {
         selectedVoice = voices.find(v => v.lang.startsWith('en'));
     }
 
-    if (selectedVoice) {
-        utterance.voice = selectedVoice;
-        // console.log(`Speaking with voice: ${selectedVoice.name} (${selectedVoice.lang})`);
-    } else {
-        console.warn('No suitable voice found, using default.');
-    }
+    // Split text into chunks to prevent Chrome timeout (max ~200 chars or 15 seconds)
+    // Regex splits by sentence endings but keeps punctuation
+    const chunks = text.match(/[^.!?]+[.!?]+|[^.!?]+$/g) || [text];
+    
+    let currentChunkIndex = 0;
 
-    utterance.onend = () => {
-      onEnd();
+    const speakNextChunk = () => {
+        if (currentChunkIndex >= chunks.length) {
+            onEnd();
+            return;
+        }
+
+        const chunkText = chunks[currentChunkIndex].trim();
+        if (!chunkText) {
+            currentChunkIndex++;
+            speakNextChunk();
+            return;
+        }
+
+        const utterance = new SpeechSynthesisUtterance(chunkText);
+        utterance.lang = targetLang;
+        utterance.rate = 0.9;
+        utterance.pitch = 1.0;
+        if (selectedVoice) {
+            utterance.voice = selectedVoice;
+        }
+
+        utterance.onend = () => {
+            currentChunkIndex++;
+            speakNextChunk();
+        };
+
+        utterance.onerror = (e) => {
+            console.error('TTS Chunk Error:', e.error); // Log specific error string
+            // Even if one chunk fails, try next or end? Usually better to end to avoid chaos.
+            onEnd(); 
+        };
+
+        window.speechSynthesis.speak(utterance);
     };
 
-    utterance.onerror = (e) => {
-      console.error('TTS Error:', e);
-      onEnd();
-    };
+    speakNextChunk();
 
-    window.speechSynthesis.speak(utterance);
   } catch (err) {
-    console.error("Speak failed", err);
+    console.error("Speak failed setup", err);
     onEnd();
   }
 };
@@ -165,7 +181,7 @@ export function getGlobalAudioContext(): AudioContext {
     const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
     globalAudioContext = new AudioContextClass();
   }
-  return globalAudioContext;
+  return globalAudioContext!;
 }
 
 // Critical for mobile: Unlock audio context on user interaction

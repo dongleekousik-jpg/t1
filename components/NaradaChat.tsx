@@ -1,6 +1,5 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { GoogleGenAI } from '@google/genai';
 import { useLanguage } from '../App';
 import { ChatMessage } from '../types';
 import { Icon } from '../constants/icons';
@@ -40,77 +39,46 @@ const NaradaChat: React.FC = () => {
     setIsLoading(true);
 
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
-      
-      const contents = `Current language is ${language}. User asks: "${text}"`;
-          
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents,
-        config: {
-            tools: [{googleSearch: {}}, {googleMaps: {}}],
-            systemInstruction: `You are Narada, a wise and devotional guide for Tirumala and Tirupati pilgrims.
-
-            CORE RESPONSIBILITIES:
-            - Provide accurate, up-to-date information about Tirumala Tirupati Devasthanams (TTD).
-            - Assist with Darshan timings, accommodation (CRO, Cottages), Sevas, and travel logistics within Tirupati/Tirumala.
-            - Explain the spiritual significance of places like Srivari Temple, Papavinasanam, Akasha Ganga, etc.
-
-            STRICT GUIDELINES:
-            1. **ACCURACY IS PARAMOUNT**: 
-               - For questions about **Darshan timings, Ticket availability, Special Entry Darshan (SED), Online Booking, or Current Crowd Status**, you MUST use the 'googleSearch' tool to find the latest official TTD updates.
-               - Do not guess specific timings, prices, or rules if you are not sure; instead, state that you are checking the latest info.
-            
-            2. **SCOPE**: 
-               - Answer ONLY regarding Tirumala, Tirupati, and related pilgrimage topics.
-               - If asked about other topics, politely redirect the devotee to the sacred purpose of this app.
-
-            3. **CONTEXTUAL UNDERSTANDING**: 
-               - "Accommodation" or "Rooms" ALWAYS refers to TTD cottages/guest houses or hotels in Tirupati/Tirumala.
-               - "Darshan" refers to Lord Venkateswara's darshan.
-
-            4. **TONE & STYLE**: 
-               - Address the user as "Devotee" or "Swami".
-               - Be polite, humble, and helpful.
-               - Keep answers **concise and direct** (max 3-4 sentences) unless a detailed procedure is asked.
-
-            5. **LANGUAGE**: 
-               - Respond in ${language}. If the query is in another language, adapt, but primarily use the requested language context.`
+      // Call backend API instead of Client SDK to avoid process.env errors in Vercel
+      const response = await fetch('/api/narada', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
         },
+        body: JSON.stringify({
+          text,
+          language
+        }),
       });
-      
-      const naradaText = response.text || "I am unable to formulate a response at this moment.";
-      const groundingChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
-      
-      let mapLink: string | undefined = undefined;
-      const webLinks: { title: string; uri: string }[] = [];
 
-      if (groundingChunks) {
-          for (const chunk of groundingChunks) {
-              if (chunk.maps) {
-                  mapLink = chunk.maps.uri;
-              }
-              if (chunk.web) {
-                  webLinks.push({ title: chunk.web.title || 'Source', uri: chunk.web.uri });
-              }
-          }
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || `Server error: ${response.status}`);
       }
+
+      const data = await response.json();
       
       const naradaMessage: ChatMessage = {
         id: (Date.now() + 1).toString(),
         sender: 'narada',
-        text: naradaText,
-        mapLink: mapLink,
-        webLinks: webLinks.length > 0 ? webLinks : undefined
+        text: data.text,
+        mapLink: data.mapLink,
+        webLinks: data.webLinks // Now typed correctly from backend response
       };
       setMessages((prev) => [...prev, naradaMessage]);
 
     } catch (error) {
-      console.error('Error with Gemini API:', error);
+      console.error('Error with Chat API:', error);
+      let errorText = 'My apologies, devotee. I am having trouble connecting to the divine realms. Please try again later.';
+      
+      if (error instanceof Error && (error.message.includes('Configuration Error') || error.message.includes('500'))) {
+          errorText = "Setup Error: The server API Key is missing. Please add 'API_KEY' to your Vercel Project Settings > Environment Variables.";
+      }
+
       const errorMessage: ChatMessage = {
         id: (Date.now() + 1).toString(),
         sender: 'narada',
-        text: 'My apologies, devotee. I am having trouble connecting to the divine realms. Please try again later.',
+        text: errorText,
       };
       setMessages((prev) => [...prev, errorMessage]);
     } finally {
@@ -121,13 +89,11 @@ const NaradaChat: React.FC = () => {
   // Using the vector logo (Icon) exclusively for reliability
   const Avatar = ({ className }: { className: string }) => (
   <img
-    //src="https://raw.githubusercontent.com/kousik4215/tirupati-images/main/naradha.jpg"
     src="https://raw.githubusercontent.com/kousik4215/tirupati-images/main/Nrada%20rushi.jpg"
     alt="Narada Avatar"
     className={`${className} object-cover rounded-full`}
   />
 );
-
 
   return (
     <>
@@ -175,20 +141,7 @@ const NaradaChat: React.FC = () => {
                     </a>
                   )}
 
-                  {msg.webLinks && msg.webLinks.length > 0 && (
-                    <div className="mt-2 flex flex-col gap-1">
-                        <span className="text-xs font-bold text-devotional-maroon/70">Sources:</span>
-                        <div className="flex flex-wrap gap-2">
-                            {msg.webLinks.map((link, idx) => (
-                                <a key={idx} href={link.uri} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded border border-blue-100 hover:underline">
-                                    <Icon name="link" className="w-3 h-3" />
-                                    {link.title}
-                                </a>
-                            ))}
-                        </div>
-                    </div>
-                  )}
-
+                  {/* Web links removed as per request */}
                 </div>
               </div>
             ))}

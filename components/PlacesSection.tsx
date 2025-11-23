@@ -1,7 +1,5 @@
 
-
 import React, { useState, useEffect, useRef } from 'react';
-import { GoogleGenAI, Modality } from '@google/genai';
 import { useLanguage } from '../App';
 import { Place } from '../types';
 import { Icon } from '../constants/icons';
@@ -235,45 +233,19 @@ const PlacesSection: React.FC<PlacesSectionProps> = ({ title, places, isSpiritua
              throw new Error("No content to speak");
           }
 
-          const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
-          let response;
-          try {
-              response = await ai.models.generateContent({
-                  model: "gemini-2.5-flash-preview-tts",
-                  contents: [{ parts: [{ text: textToSpeak }] }],
-                  config: {
-                      responseModalities: [Modality.AUDIO],
-                      speechConfig: {
-                          voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } },
-                      },
-                  },
-              });
-          } catch (err) {
-             console.warn("Primary TTS request failed, attempting fallback", err);
+          // Fetch from Serverless Function
+          const response = await fetch('/api/generate-tts', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ text: textToSpeak })
+          });
+
+          if (!response.ok) {
+              throw new Error(`TTS API failed: ${response.status}`);
           }
 
-          let base64Audio = response?.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-          
-          // FALLBACK 1: If full text fails (e.g. safety filters), try just the name and simple text
-          if (!base64Audio) {
-              console.log("Retrying with simplified text...");
-              const simpleText = `${name}. Please visit this sacred place.`.replace(/["']/g, "").trim();
-              try {
-                const retryResponse = await ai.models.generateContent({
-                    model: "gemini-2.5-flash-preview-tts",
-                    contents: [{ parts: [{ text: simpleText }] }],
-                    config: {
-                        responseModalities: [Modality.AUDIO],
-                        speechConfig: {
-                            voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } },
-                        },
-                    },
-                });
-                base64Audio = retryResponse.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-              } catch (retryErr) {
-                 console.error("Retry failed", retryErr);
-              }
-          }
+          const data = await response.json();
+          const base64Audio = data.base64Audio;
 
           if (base64Audio) {
               // Save to DB immediately
@@ -294,10 +266,10 @@ const PlacesSection: React.FC<PlacesSectionProps> = ({ title, places, isSpiritua
                    setPlayingPlaceId(place.id);
               }
           } else {
-              throw new Error("No audio data received from API after retry");
+              throw new Error("No audio data received from API");
           }
       } catch (error) {
-          console.warn("Gemini TTS failed completely, falling back to native browser TTS", error);
+          console.warn("Server TTS failed, falling back to native browser TTS", error);
           
           // FALLBACK 2: Native Browser TTS (Last Resort)
           if (activeRequestId.current === requestId && isMounted.current) {
