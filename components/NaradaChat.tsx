@@ -56,7 +56,14 @@ const NaradaChat: React.FC = () => {
       });
 
       if (!res.ok) {
-        throw new Error(`Server responded with ${res.status}`);
+        // Try to parse error details
+        let errorDetails = `Status: ${res.status}`;
+        try {
+            const errorJson = await res.json();
+            if (errorJson.error) errorDetails += ` - ${errorJson.error}`;
+            if (errorJson.details) errorDetails += ` (${errorJson.details})`;
+        } catch (e) { /* ignore parse error */ }
+        throw new Error(errorDetails);
       }
 
       const data = await res.json();
@@ -74,12 +81,12 @@ const NaradaChat: React.FC = () => {
       };
       setMessages((prev) => [...prev, naradaMessage]);
 
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error contacting backend Narada endpoint:', error);
       const errorMessage: ChatMessage = {
         id: (Date.now() + 1).toString(),
         sender: 'narada',
-        text: 'My apologies, devotee. I am having trouble connecting to the divine realms. Please try again later.',
+        text: `My apologies, devotee. I am having trouble connecting to the divine realms. (Error: ${error.message || 'Unknown'})`,
       };
       setMessages((prev) => [...prev, errorMessage]);
     } finally {
