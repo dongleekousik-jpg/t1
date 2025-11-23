@@ -110,7 +110,7 @@ export function getGlobalAudioContext(): AudioContext {
     const AudioContextClass = (window as any).AudioContext || (window as any).webkitAudioContext;
     globalAudioContext = new AudioContextClass();
   }
-  return globalAudioContext;
+  return globalAudioContext as AudioContext;
 }
 
 // Critical for mobile: Unlock audio context on user interaction
